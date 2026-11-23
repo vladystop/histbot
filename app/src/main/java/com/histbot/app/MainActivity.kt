@@ -230,7 +230,7 @@ class MainActivity : AppCompatActivity() {
         adapter = ChatAdapter(messages) { text -> copyToClipboard(text) }
         recycler.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
         recycler.adapter = adapter
-
+        recycler.itemAnimator = null
         sessionAdapter = SessionAdapter(
             items = filteredSessions,
             getActiveId = { currentSession.id },
@@ -393,10 +393,11 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     model.generate(baseCtx, modelQuestion, stopFlag) { partial ->
                         runOnUiThread {
-                            botMsg.text = partial
-                            adapter.notifyItemChanged(botIndex)
-                            recycler.scrollToPosition(botIndex)
-                        }
+    val atBottom = !recycler.canScrollVertically(1)
+    botMsg.text = partial
+    adapter.notifyItemChanged(botIndex)
+    if (atBottom) recycler.scrollToPosition(botIndex)
+}
                     }
                 }
 
