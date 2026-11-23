@@ -72,20 +72,27 @@ class RagEngine(context: Context) {
             var bestItem: KbItem? = null
             var bestScore = 0.0
             for ((tStems, bStems, item) in index) {
+                if (tStems.isEmpty()) continue
                 var tHits = 0
                 for (w in qSet) if (w in tStems) tHits++
+                if (tHits == 0) continue
+
+                val titleCoverage = tHits.toDouble() / tStems.size
+                val queryCoverage = tHits.toDouble() / qSet.size
+
+                if (titleCoverage < 0.75 || queryCoverage < 0.5) continue
+
                 var bHits = 0
                 for (w in qSet) if (w in bStems) bHits++
-                if (tHits == 0 && bHits == 0) continue
 
-                var score = tHits * 4.0 + bHits * 1.0
-                if (tStems.isNotEmpty() && qSet.containsAll(tStems)) score += 5.0
+                var score = titleCoverage * 10.0 + queryCoverage * 5.0 + bHits * 0.5
+                if (tStems == qSet) score += 10.0
                 if (score > bestScore) {
                     bestScore = score
                     bestItem = item
                 }
             }
-            if (bestItem != null && bestScore >= 3.0) {
+            if (bestItem != null) {
                 return RagHit(bestItem, "Локальная база: ${bestItem.title}")
             }
         }
@@ -93,9 +100,11 @@ class RagEngine(context: Context) {
         onStatus("Ищу в Википедии...")
         val webItem = fetchWikipedia(question)
         if (webItem != null) {
-            kb.add(webItem)
-            index.add(Triple(tokenize(webItem.title).toSet(), tokenize(webItem.text).toSet(), webItem))
-            saveKb()
+            if (kb.none { it.title.equals(webItem.title, ignoreCase = true) }) {
+                kb.add(webItem)
+                index.add(Triple(tokenize(webItem.title).toSet(), tokenize(webItem.text).toSet(), webItem))
+                saveKb()
+            }
             return RagHit(webItem, "Википедия: ${webItem.title} (сохранено)")
         }
 
@@ -105,10 +114,14 @@ class RagEngine(context: Context) {
     private fun cleanText(raw: String): String {
         var t = raw.replace("\u0301", "")
         t = Regex("""\[\d+]""").replace(t, "")
-        t = Regex("""\(\s*(?:англ|лат|греч|др\.-греч|фр|нем|исп|ит|рус|церк\.-слав|монг|тур)\.?\s*[,;:\s—–\-]*\)""", RegexOption.IGNORE_CASE).replace(t, "")
+        t = Regex(
+            """\([^)]*(?:монг\.|англ\.|лат\.|греч\.|фр\.|нем\.|исп\.|ит\.|кит\.|яп\.|араб\.|тюрк\.|татар\.|перс\.|рус\.|церк\.-слав\.|МФА)[^)]*\)""",
+            RegexOption.IGNORE_CASE
+        ).replace(t, "")
+        t = Regex("""[^а-яА-ЯёЁa-zA-Z0-9\s.,;:!?()—–«»"'/-]""").replace(t, "")
         t = Regex("""\(\s*[;:,]+\s*""").replace(t, "(")
         t = Regex("""\s*[;:,]+\s*\)""").replace(t, ")")
-        t = Regex("""\([\s,;:.—–\-/]*\)""").replace(t, "")
+        t = Regex("""\([\s,;:.—–/-]*\)""").replace(t, "")
         t = Regex("""\s+([,.;:!?])""").replace(t, "$1")
         t = Regex("""[ \t\n]+""").replace(t, " ")
         return t.trim()
