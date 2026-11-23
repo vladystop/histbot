@@ -22,10 +22,9 @@ class RagEngine(context: Context) {
         "была", "было", "были", "для", "при", "или", "под", "над", "из", "по", "на", "в", "о", "с", "и", "а"
     )
     private val greetings = listOf("привет", "здравствуй", "добрый день", "кто ты", "что ты умеешь", "как тебя зовут")
-    private val wordRegex = Regex("[а-яА-ЯёЁa-zA-Z0-9\-]+")
+    private val wordRegex = Regex("""[а-яА-ЯёЁa-zA-Z0-9\-]+""")
     private val stemRegex = Regex(
-        "(иями|ями|ами|ого|его|ому|ему|ими|ыми|ою|ею|ой|ей|ий|ый|ая|яя|ое|ее|ые|ие|" +
-        "ом|ем|ам|ям|ах|ях|ов|ев|ей|ью|ия|ии|ию|ей|а|я|у|ю|ы|и|е|о|ь)$"
+        """(иями|ями|ами|ого|его|ому|ему|ими|ыми|ою|ею|ой|ей|ий|ый|ая|яя|ое|ее|ые|ие|ом|ем|ам|ям|ах|ях|ов|ев|ей|ью|ия|ии|ию|ей|а|я|у|ю|ы|и|е|о|ь)$"""
     )
 
     init {
@@ -104,19 +103,19 @@ class RagEngine(context: Context) {
     }
 
     private fun cleanText(raw: String): String {
-        var t = raw.replace("́", "")
-        t = Regex("\[\d+]").replace(t, "")
-        t = Regex("\(\s*(?:англ|лат|греч|др\.-греч|фр|нем|исп|ит|рус|церк\.-слав|монг|тур)\.?\s*[,;:\s—–\-]*\)", RegexOption.IGNORE_CASE).replace(t, "")
-        t = Regex("\(\s*[;:,]+\s*").replace(t, "(")
-        t = Regex("\s*[;:,]+\s*\)").replace(t, ")")
-        t = Regex("\([\s,;:.—–\-/]*\)").replace(t, "")
-        t = Regex("\s+([,.;:!?])").replace(t, "$1")
-        t = Regex("[ \t\n]+").replace(t, " ")
+        var t = raw.replace("\u0301", "")
+        t = Regex("""\[\d+]""").replace(t, "")
+        t = Regex("""\(\s*(?:англ|лат|греч|др\.-греч|фр|нем|исп|ит|рус|церк\.-слав|монг|тур)\.?\s*[,;:\s—–\-]*\)""", RegexOption.IGNORE_CASE).replace(t, "")
+        t = Regex("""\(\s*[;:,]+\s*""").replace(t, "(")
+        t = Regex("""\s*[;:,]+\s*\)""").replace(t, ")")
+        t = Regex("""\([\s,;:.—–\-/]*\)""").replace(t, "")
+        t = Regex("""\s+([,.;:!?])""").replace(t, "$1")
+        t = Regex("""[ \t\n]+""").replace(t, " ")
         return t.trim()
     }
 
     private fun cutSentences(text: String, maxChars: Int = 500): String {
-        val sents = text.split(Regex("(?<=[.!?])\s+"))
+        val sents = text.split(Regex("""(?<=[.!?])\s+"""))
         val res = ArrayList<String>()
         var total = 0
         for (s in sents) {
