@@ -95,7 +95,8 @@ class MainActivity : AppCompatActivity() {
     private val followUpMarkers = setOf(
         "он", "она", "оно", "они", "его", "её", "ее", "их", "ему", "ей", "им",
         "ним", "ней", "нём", "нем", "этом", "этой", "этого", "эту", "этот", "эти",
-        "там", "тогда", "подробнее", "дальше", "ещё", "еще", "почему", "зачем"
+        "там", "тогда", "подробнее", "дальше", "ещё", "еще", "почему", "зачем",
+        "ты", "уверен", "уверена", "точно", "правда", "серьезно", "серьёзно", "откуда", "сколько"
     )
 
     private val messages = ArrayList<ChatMessage>()
@@ -224,6 +225,8 @@ class MainActivity : AppCompatActivity() {
 
                 val baseCtx: String
                 val sourceLabel: String
+                var hasData = true
+
                 if (hit.item != null) {
                     baseCtx = "${hit.item.title}. ${hit.item.text}"
                     sourceLabel = hit.sourceLabel
@@ -233,12 +236,11 @@ class MainActivity : AppCompatActivity() {
                     baseCtx = currentSession.lastContext
                     sourceLabel = "Память чата: ${currentSession.lastTopic}"
                 } else {
-                    baseCtx = "нет данных."
+                    baseCtx = ""
                     sourceLabel = hit.sourceLabel
+                    hasData = false
                 }
 
-                val historySnippet = buildHistoryContext()
-                val fullCtx = if (historySnippet.isNotEmpty()) "$historySnippet $baseCtx" else baseCtx
                 val modelQuestion = if (followUp) "${currentSession.lastTopic}: $q" else q
 
                 withContext(Dispatchers.Main) {
@@ -247,14 +249,20 @@ class MainActivity : AppCompatActivity() {
                     adapter.notifyItemChanged(botIndex)
                 }
 
-                val finalAns = if (rag.isGreeting(q) && q.lowercase().startsWith("привет")) {
-                    "Привет! Я локальная историческая нейросеть на 30M параметров с базой знаний (RAG). Задавай вопросы по истории!"
-                } else {
-                    model.generate(fullCtx, modelQuestion, stopFlag) { partial ->
-                        runOnUiThread {
-                            botMsg.text = partial
-                            adapter.notifyItemChanged(botIndex)
-                            recycler.scrollToPosition(botIndex)
+                val finalAns = when {
+                    rag.isGreeting(q) && q.lowercase().startsWith("привет") -> {
+                        "Привет! Я локальная историческая нейросеть на 30M параметров с базой знаний (RAG). Задавай вопросы по истории!"
+                    }
+                    !hasData -> {
+                        "Не нашёл подходящую статью в базе и Википедии. Попробуй указать имя правителя, событие или страну точнее."
+                    }
+                    else -> {
+                        model.generate(baseCtx, modelQuestion, stopFlag) { partial ->
+                            runOnUiThread {
+                                botMsg.text = partial
+                                adapter.notifyItemChanged(botIndex)
+                                recycler.scrollToPosition(botIndex)
+                            }
                         }
                     }
                 }
@@ -281,19 +289,6 @@ class MainActivity : AppCompatActivity() {
     private fun isFollowUp(q: String): Boolean {
         val words = Regex("""[а-яА-ЯёЁa-zA-Z0-9]+""").findAll(q.lowercase()).map { it.value }.toList()
         return words.any { it in followUpMarkers }
-    }
-
-    private fun buildHistoryContext(): String {
-        val prev = currentSession.messages.dropLast(2).filter { it.text != welcomeText }
-        if (prev.isEmpty()) return ""
-        val recent = prev.takeLast(4)
-        val sb = StringBuilder("Ранее в чате: ")
-        for (m in recent) {
-            val prefix = if (m.isUser) "В: " else "О: "
-            sb.append(prefix).append(m.text.take(90)).append(" ")
-            if (sb.length > 220) break
-        }
-        return sb.toString().trim().take(240)
     }
 
     private fun startNewChat() {
