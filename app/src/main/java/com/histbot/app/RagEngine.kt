@@ -18,8 +18,13 @@ class RagEngine(context: Context) {
 
     private val stopwords = setOf(
         "что", "такое", "кто", "такой", "такая", "такие", "расскажи", "про", "об", "обо",
-        "известно", "кратко", "истории", "история", "это", "как", "где", "когда", "был",
-        "была", "было", "были", "для", "при", "или", "под", "над", "из", "по", "на", "в", "о", "с", "и", "а"
+        "известно", "кратко", "это", "как", "где", "когда", "был", "была", "было", "были",
+        "для", "при", "или", "под", "над", "из", "по", "на", "в", "о", "с", "и", "а",
+        "посмотри", "найди", "поищи", "интернете", "интернет", "википедии", "википедия",
+        "скажи", "подскажи", "пожалуйста", "можешь", "нужно", "мне"
+    )
+    private val smallTalk = setOf(
+        "почти", "да", "нет", "ок", "окей", "ладно", "понятно", "ясно", "спасибо", "ага", "угу", "круто", "классно"
     )
     private val greetings = listOf("привет", "здравствуй", "добрый день", "кто ты", "что ты умеешь", "как тебя зовут")
     private val wordRegex = Regex("""[а-яА-ЯёЁa-zA-Z0-9\-]+""")
@@ -62,8 +67,13 @@ class RagEngine(context: Context) {
         return greetings.any { q.startsWith(it) }
     }
 
+    private fun isSmallTalk(question: String): Boolean {
+        val words = wordRegex.findAll(question.lowercase()).map { it.value }.toList()
+        return words.size == 1 && words[0] in smallTalk
+    }
+
     fun search(question: String, onStatus: (String) -> Unit): RagHit {
-        if (isGreeting(question)) {
+        if (isGreeting(question) || isSmallTalk(question)) {
             return RagHit(null, "")
         }
 
@@ -79,8 +89,12 @@ class RagEngine(context: Context) {
 
                 val titleCoverage = tHits.toDouble() / tStems.size
                 val queryCoverage = tHits.toDouble() / qSet.size
-
                 if (titleCoverage < 0.75 || queryCoverage < 0.5) continue
+
+                // Если в вопросе есть уточнение (население, президент, история),
+                // которого нет в локальной статье — пропускаем её и идём в Википедию
+                val missingWords = qSet.count { it !in tStems && it !in bStems }
+                if (missingWords > 0) continue
 
                 var bHits = 0
                 for (w in qSet) if (w in bStems) bHits++
@@ -113,14 +127,12 @@ class RagEngine(context: Context) {
 
     private fun cleanText(raw: String): String {
         var t = raw.replace("\u0301", "")
-            .replace("\u00A0", " ")
         t = Regex("""\[\d+]""").replace(t, "")
-        val langParens = Regex(
-            """\([^()]*?(?:монг\.|англ\.|лат\.|греч\.|фр\.|нем\.|исп\.|ит\.|кит\.|яп\.|араб\.|тюрк\.|татар\.|перс\.|рус\.|церк\.-слав\.|МФА)[^()]*\)""",
+        t = Regex(
+            """\([^)]*(?:монг\.|англ\.|лат\.|греч\.|фр\.|нем\.|исп\.|ит\.|кит\.|яп\.|араб\.|тюрк\.|татар\.|перс\.|рус\.|церк\.-слав\.|МФА)[^)]*\)""",
             RegexOption.IGNORE_CASE
-        )
-        repeat(2) { t = langParens.replace(t, "") }
-        t = Regex("""[^а-яА-ЯёЁa-zA-Z0-9²\s.,;:!?()—–«»"'/-]""").replace(t, "")
+        ).replace(t, "")
+        t = Regex("""[^а-яА-ЯёЁa-zA-Z0-9\s.,;:!?()—–«»"'/-]""").replace(t, "")
         t = Regex("""\(\s*[;:,]+\s*""").replace(t, "(")
         t = Regex("""\s*[;:,]+\s*\)""").replace(t, ")")
         t = Regex("""\([\s,;:.—–/-]*\)""").replace(t, "")
@@ -155,15 +167,28 @@ class RagEngine(context: Context) {
             val query = words.joinToString(" ").trim()
             if (query.isEmpty()) return null
 
+            val qStems = tokenize(query).toSet()
             val qEnc = URLEncoder.encode(query, "UTF-8")
             val searchJson = httpGet(
-                "https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch=$qEnc&srlimit=1&format=json&utf8=1"
+                "https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch=$qEnc&srlimit=5&format=json&utf8=1"
             )
             val results = JSONObject(searchJson).getJSONObject("query").getJSONArray("search")
             if (results.length() == 0) return null
-            val title = results.getJSONObject(0).getString("title")
 
-            val tEnc = URLEncoder.encode(title, "UTF-8")
+            // Выбираем из топ-5 статью, заголовок которой лучше всего совпадает с запросом
+            var bestTitle = results.getJSONObject(0).getString("title")
+            var bestHits = -1
+            for (i in 0 until results.length()) {
+                val candTitle = results.getJSONObject(i).getString("title")
+                val candStems = tokenize(candTitle).toSet()
+                val hits = qStems.count { it in candStems }
+                if (hits > bestHits) {
+                    bestHits = hits
+                    bestTitle = candTitle
+                }
+            }
+
+            val tEnc = URLEncoder.encode(bestTitle, "UTF-8")
             val extractJson = httpGet(
                 "https://ru.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&redirects=1&titles=$tEnc&format=json&utf8=1"
             )
@@ -173,7 +198,7 @@ class RagEngine(context: Context) {
                 val page = pages.getJSONObject(keys.next())
                 val extract = cleanText(page.optString("extract", ""))
                 if (extract.length >= 60) {
-                    return KbItem(cleanText(page.optString("title", title)), cutSentences(extract, 500))
+                    return KbItem(cleanText(page.optString("title", bestTitle)), cutSentences(extract, 500))
                 }
             }
             null
