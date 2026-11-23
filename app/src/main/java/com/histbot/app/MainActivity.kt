@@ -226,8 +226,7 @@ class MainActivity : AppCompatActivity() {
                     sourceLabel = hit.sourceLabel
                 }
 
-                val historySnippet = buildHistoryContext()
-                val fullCtx = if (historySnippet.isNotEmpty()) "$historySnippet $baseCtx" else baseCtx
+                                val fullCtx = baseCtx
                 val modelQuestion = if (followUp) "${currentSession.lastTopic}: $q" else q
 
                 withContext(Dispatchers.Main) {
