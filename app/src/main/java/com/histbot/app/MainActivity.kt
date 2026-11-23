@@ -3,15 +3,25 @@ package com.histbot.app
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextUtils
+import android.text.TextWatcher
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.GravityCompat
+import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -21,9 +31,6 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 data class ChatMessage(
@@ -36,6 +43,7 @@ data class ChatSession(
     val id: String,
     var title: String,
     var updatedAt: Long,
+    var isPinned: Boolean = false,
     var lastTopic: String = "",
     var lastContext: String = "",
     val messages: ArrayList<ChatMessage> = ArrayList()
@@ -88,6 +96,82 @@ class ChatAdapter(
     }
 }
 
+class SessionAdapter(
+    private val items: List<ChatSession>,
+    private val getActiveId: () -> String,
+    private val onSelect: (ChatSession) -> Unit,
+    private val onMore: (ChatSession) -> Unit
+) : RecyclerView.Adapter<SessionAdapter.SessionVH>() {
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): SessionVH {
+        val density = parent.context.resources.displayMetrics.density
+        val row = LinearLayout(parent.context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = RecyclerView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                (44 * density).toInt()
+            ).apply {
+                bottomMargin = (2 * density).toInt()
+            }
+            setPadding((14 * density).toInt(), 0, (6 * density).toInt(), 0)
+        }
+
+        val titleView = TextView(parent.context).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            textSize = 14f
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+
+        val moreBtn = TextView(parent.context).apply {
+            layoutParams = LinearLayout.LayoutParams((34 * density).toInt(), (34 * density).toInt())
+            gravity = Gravity.CENTER
+            text = "⋮"
+            textSize = 17f
+            setTextColor(Color.parseColor("#9B9B9B"))
+        }
+
+        row.addView(titleView)
+        row.addView(moreBtn)
+        return SessionVH(row, titleView, moreBtn)
+    }
+
+    override fun getItemCount(): Int = items.size
+
+    override fun onBindViewHolder(holder: SessionVH, position: Int) {
+        val session = items[position]
+        val isActive = session.id == getActiveId()
+        val density = holder.row.context.resources.displayMetrics.density
+
+        val prefix = if (session.isPinned) "📌 " else ""
+        holder.title.text = prefix + session.title
+
+        if (isActive) {
+            val pill = GradientDrawable().apply {
+                setColor(Color.parseColor("#2A2B2E"))
+                cornerRadius = 22 * density
+            }
+            holder.row.background = pill
+            holder.title.setTextColor(Color.parseColor("#FFFFFF"))
+            holder.title.setTypeface(null, Typeface.BOLD)
+        } else {
+            holder.row.background = null
+            holder.title.setTextColor(Color.parseColor("#D4D4D4"))
+            holder.title.setTypeface(null, Typeface.NORMAL)
+        }
+
+        holder.row.setOnClickListener { onSelect(session) }
+        holder.moreBtn.setOnClickListener { onMore(session) }
+    }
+
+    class SessionVH(
+        val row: LinearLayout,
+        val title: TextView,
+        val moreBtn: TextView
+    ) : RecyclerView.ViewHolder(row)
+}
+
 class MainActivity : AppCompatActivity() {
     private val welcomeText =
         "Привет! Я твоя локальная историческая нейросеть на 30M параметров. Спрашивай про события, правителей и эпохи."
@@ -100,15 +184,24 @@ class MainActivity : AppCompatActivity() {
 
     private val messages = ArrayList<ChatMessage>()
     private val sessions = ArrayList<ChatSession>()
+    private val filteredSessions = ArrayList<ChatSession>()
     private lateinit var currentSession: ChatSession
     private lateinit var historyFile: File
 
+    private lateinit var drawerLayout: DrawerLayout
     private lateinit var adapter: ChatAdapter
+    private lateinit var sessionAdapter: SessionAdapter
     private lateinit var recycler: RecyclerView
+    private lateinit var sessionsRecycler: RecyclerView
     private lateinit var inputEdit: EditText
+    private lateinit var searchChatsEdit: EditText
     private lateinit var sendBtn: TextView
     private lateinit var statusText: TextView
     private lateinit var menuBtn: TextView
+    private lateinit var quickNewChatBtn: TextView
+    private lateinit var newChatDrawerBtn: TextView
+    private lateinit var resetCacheBtn: View
+    private lateinit var cacheInfoText: TextView
 
     private var ragEngine: RagEngine? = null
     private var histModel: HistModel? = null
@@ -121,15 +214,38 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         historyFile = File(filesDir, "chat_history.json")
+        drawerLayout = findViewById(R.id.drawerLayout)
         recycler = findViewById(R.id.chatRecycler)
+        sessionsRecycler = findViewById(R.id.sessionsRecycler)
         inputEdit = findViewById(R.id.inputEdit)
+        searchChatsEdit = findViewById(R.id.searchChatsEdit)
         sendBtn = findViewById(R.id.sendBtn)
         statusText = findViewById(R.id.statusText)
         menuBtn = findViewById(R.id.menuBtn)
+        quickNewChatBtn = findViewById(R.id.quickNewChatBtn)
+        newChatDrawerBtn = findViewById(R.id.newChatDrawerBtn)
+        resetCacheBtn = findViewById(R.id.resetCacheBtn)
+        cacheInfoText = findViewById(R.id.cacheInfoText)
 
         adapter = ChatAdapter(messages) { text -> copyToClipboard(text) }
         recycler.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
         recycler.adapter = adapter
+
+        sessionAdapter = SessionAdapter(
+            items = filteredSessions,
+            getActiveId = { currentSession.id },
+            onSelect = { session ->
+                if (isGenerating) {
+                    Toast.makeText(this, "Дождитесь окончания ответа", Toast.LENGTH_SHORT).show()
+                } else {
+                    openSession(session)
+                    drawerLayout.closeDrawer(GravityCompat.START)
+                }
+            },
+            onMore = { session -> showSessionActions(session) }
+        )
+        sessionsRecycler.layoutManager = LinearLayoutManager(this)
+        sessionsRecycler.adapter = sessionAdapter
 
         loadSessionsFromDisk()
         if (sessions.isNotEmpty()) {
@@ -139,11 +255,49 @@ class MainActivity : AppCompatActivity() {
         }
 
         menuBtn.setOnClickListener {
+            refreshSessionList()
+            drawerLayout.openDrawer(GravityCompat.START)
+        }
+
+        val createNewChatAction = {
             if (isGenerating) {
                 Toast.makeText(this, "Дождитесь окончания ответа", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
+            } else {
+                startNewChat()
+                drawerLayout.closeDrawer(GravityCompat.START)
             }
-            showSettingsMenu()
+        }
+        quickNewChatBtn.setOnClickListener { createNewChatAction() }
+        newChatDrawerBtn.setOnClickListener { createNewChatAction() }
+
+        searchChatsEdit.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                refreshSessionList()
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+
+        resetCacheBtn.setOnClickListener {
+            val rag = ragEngine ?: return@setOnClickListener
+            AlertDialog.Builder(this)
+                .setTitle("Сбросить кэш Википедии?")
+                .setMessage("Скачанные из интернета статьи будут удалены, останутся исходные 2456 статей.")
+                .setPositiveButton("Сбросить") { _, _ ->
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        val baseCount = rag.resetCache()
+                        withContext(Dispatchers.Main) {
+                            updateStatusBar(baseCount)
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Кэш очищен ($baseCount базовых статей)",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                }
+                .setNegativeButton("Отмена", null)
+                .show()
         }
 
         lifecycleScope.launch(Dispatchers.IO) {
@@ -155,7 +309,7 @@ class MainActivity : AppCompatActivity() {
                 histModel = model
                 isReady = true
                 withContext(Dispatchers.Main) {
-                    statusText.text = "Готов • ${rag.articleCount()} статей + Википедия"
+                    updateStatusBar(rag.articleCount())
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
@@ -176,7 +330,7 @@ class MainActivity : AppCompatActivity() {
             inputEdit.setText("")
 
             if (currentSession.title == "Новый чат") {
-                currentSession.title = q.take(42)
+                currentSession.title = q.take(48)
             }
             currentSession.updatedAt = System.currentTimeMillis()
             upsertCurrentSession()
@@ -226,7 +380,6 @@ class MainActivity : AppCompatActivity() {
                     sourceLabel = hit.sourceLabel
                 }
 
-                                val fullCtx = baseCtx
                 val modelQuestion = if (followUp) "${currentSession.lastTopic}: $q" else q
 
                 withContext(Dispatchers.Main) {
@@ -238,7 +391,7 @@ class MainActivity : AppCompatActivity() {
                 val finalAns = if (rag.isGreeting(q) && q.lowercase().startsWith("привет")) {
                     "Привет! Я локальная историческая нейросеть на 30M параметров с базой знаний (RAG). Задавай вопросы по истории!"
                 } else {
-                    model.generate(fullCtx, modelQuestion, stopFlag) { partial ->
+                    model.generate(baseCtx, modelQuestion, stopFlag) { partial ->
                         runOnUiThread {
                             botMsg.text = partial
                             adapter.notifyItemChanged(botIndex)
@@ -251,8 +404,9 @@ class MainActivity : AppCompatActivity() {
                     botMsg.text = finalAns.ifEmpty { "Не удалось сформировать ответ." }
                     currentSession.updatedAt = System.currentTimeMillis()
                     saveSessionsToDisk()
+                    refreshSessionList()
                     adapter.notifyItemChanged(botIndex)
-                    statusText.text = "Готов • ${rag.articleCount()} статей + Википедия"
+                    updateStatusBar(rag.articleCount())
                     isGenerating = false
                     sendBtn.text = "↑"
                 }
@@ -260,41 +414,69 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showSettingsMenu() {
-        val rag = ragEngine
-        val savedWikiCount = if (rag != null) (rag.articleCount() - 2456).coerceAtLeast(0) else 0
-        val options = arrayOf(
-            "История чатов (${sessions.size})",
-            "Новый чат / Очистить экран",
-            "Сбросить кэш Википедии (+$savedWikiCount)"
-        )
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+            drawerLayout.closeDrawer(GravityCompat.START)
+        } else {
+            super.onBackPressed()
+        }
+    }
+
+    private fun updateStatusBar(count: Int) {
+        statusText.text = "Готов • $count статей + Википедия"
+        val extra = (count - 2456).coerceAtLeast(0)
+        cacheInfoText.text = "Сбросить кэш Википедии (+$extra)"
+    }
+
+    private fun showSessionActions(session: ChatSession) {
+        val pinLabel = if (session.isPinned) "Открепить" else "Закрепить"
+        val options = arrayOf(pinLabel, "Переименовать", "Удалить")
 
         AlertDialog.Builder(this)
-            .setTitle("Настройки")
+            .setTitle(session.title)
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> showHistoryDialog()
+                    0 -> {
+                        session.isPinned = !session.isPinned
+                        saveSessionsToDisk()
+                        refreshSessionList()
+                    }
                     1 -> {
-                        startNewChat()
-                        Toast.makeText(this, "Начат новый чат", Toast.LENGTH_SHORT).show()
+                        val edit = EditText(this).apply {
+                            setText(session.title)
+                            setSelection(text.length)
+                        }
+                        AlertDialog.Builder(this)
+                            .setTitle("Переименовать чат")
+                            .setView(edit)
+                            .setPositiveButton("Сохранить") { _, _ ->
+                                val newTitle = edit.text.toString().trim()
+                                if (newTitle.isNotEmpty()) {
+                                    session.title = newTitle
+                                    saveSessionsToDisk()
+                                    refreshSessionList()
+                                }
+                            }
+                            .setNegativeButton("Отмена", null)
+                            .show()
                     }
                     2 -> {
-                        if (rag == null) return@setItems
-                        lifecycleScope.launch(Dispatchers.IO) {
-                            val baseCount = rag.resetCache()
-                            withContext(Dispatchers.Main) {
-                                statusText.text = "Готов • $baseCount статей + Википедия"
-                                Toast.makeText(
-                                    this@MainActivity,
-                                    "Кэш Википедии очищен ($baseCount базовых статей)",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                        sessions.removeAll { it.id == session.id }
+                        saveSessionsToDisk()
+                        if (currentSession.id == session.id) {
+                            if (sessions.isNotEmpty()) {
+                                openSession(sessions.first())
+                            } else {
+                                startNewChat()
                             }
+                        } else {
+                            refreshSessionList()
                         }
+                        Toast.makeText(this, "Чат удалён", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
-            .setNegativeButton("Закрыть", null)
             .show()
     }
 
@@ -309,19 +491,6 @@ class MainActivity : AppCompatActivity() {
         return words.any { it in followUpMarkers }
     }
 
-    private fun buildHistoryContext(): String {
-        val prev = currentSession.messages.dropLast(2).filter { it.text != welcomeText }
-        if (prev.isEmpty()) return ""
-        val recent = prev.takeLast(4)
-        val sb = StringBuilder("Ранее в чате: ")
-        for (m in recent) {
-            val prefix = if (m.isUser) "В: " else "О: "
-            sb.append(prefix).append(m.text.take(90)).append(" ")
-            if (sb.length > 220) break
-        }
-        return sb.toString().trim().take(240)
-    }
-
     private fun startNewChat() {
         currentSession = ChatSession(
             id = System.currentTimeMillis().toString(),
@@ -332,6 +501,7 @@ class MainActivity : AppCompatActivity() {
         messages.clear()
         messages.addAll(currentSession.messages)
         adapter.notifyDataSetChanged()
+        refreshSessionList()
     }
 
     private fun openSession(session: ChatSession) {
@@ -339,6 +509,7 @@ class MainActivity : AppCompatActivity() {
         messages.clear()
         messages.addAll(session.messages)
         adapter.notifyDataSetChanged()
+        refreshSessionList()
         if (messages.isNotEmpty()) {
             recycler.scrollToPosition(messages.size - 1)
         }
@@ -347,40 +518,32 @@ class MainActivity : AppCompatActivity() {
     private fun upsertCurrentSession() {
         sessions.removeAll { it.id == currentSession.id }
         sessions.add(0, currentSession)
+        refreshSessionList()
     }
 
-    private fun showHistoryDialog() {
-        if (sessions.isEmpty()) {
-            Toast.makeText(this, "История чатов пока пуста", Toast.LENGTH_SHORT).show()
-            return
+    private fun refreshSessionList() {
+        val query = searchChatsEdit.text.toString().trim().lowercase()
+        val sorted = sessions.sortedWith(
+            compareByDescending<ChatSession> { it.isPinned }.thenByDescending { it.updatedAt }
+        )
+        filteredSessions.clear()
+        if (query.isEmpty()) {
+            filteredSessions.addAll(sorted)
+        } else {
+            filteredSessions.addAll(
+                sorted.filter { s ->
+                    s.title.lowercase().contains(query) ||
+                        s.messages.any { it.text.lowercase().contains(query) }
+                }
+            )
         }
-        val fmt = SimpleDateFormat("dd.MM HH:mm", Locale.getDefault())
-        val labels = sessions.map { s ->
-            "${s.title}\n${fmt.format(Date(s.updatedAt))}"
-        }.toTypedArray()
-
-        AlertDialog.Builder(this)
-            .setTitle("История чатов")
-            .setItems(labels) { _, which ->
-                openSession(sessions[which])
-            }
-            .setPositiveButton("Новый чат") { _, _ ->
-                startNewChat()
-            }
-            .setNeutralButton("Удалить все") { _, _ ->
-                sessions.clear()
-                saveSessionsToDisk()
-                startNewChat()
-                Toast.makeText(this, "История очищена", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Закрыть", null)
-            .show()
+        sessionAdapter.notifyDataSetChanged()
     }
 
     private fun saveSessionsToDisk() {
         try {
             val arr = JSONArray()
-            for (s in sessions.take(30)) {
+            for (s in sessions.take(50)) {
                 val msgArr = JSONArray()
                 for (m in s.messages) {
                     msgArr.put(
@@ -395,6 +558,7 @@ class MainActivity : AppCompatActivity() {
                         .put("id", s.id)
                         .put("title", s.title)
                         .put("updatedAt", s.updatedAt)
+                        .put("isPinned", s.isPinned)
                         .put("lastTopic", s.lastTopic)
                         .put("lastContext", s.lastContext)
                         .put("messages", msgArr)
@@ -429,6 +593,7 @@ class MainActivity : AppCompatActivity() {
                         id = obj.getString("id"),
                         title = obj.getString("title"),
                         updatedAt = obj.getLong("updatedAt"),
+                        isPinned = obj.optBoolean("isPinned", false),
                         lastTopic = obj.optString("lastTopic", ""),
                         lastContext = obj.optString("lastContext", ""),
                         messages = msgs
