@@ -14,9 +14,9 @@ class BpeTokenizer(context: Context, assetName: String = "bpe_hist.json") {
 
     val eosId: Int
 
-    private val pat = Regex(
-        "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+"
-    )
+    // ИСПРАВЛЕНО: используем raw string """...""", чтобы сохранить экранирование \p{L}, \s и т.д.
+    // Это стандартный GPT-2 regex, который корректно работает с кириллицей и юникодом.
+    private val pat = Regex("""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
 
     init {
         initByteMaps()
@@ -66,6 +66,7 @@ class BpeTokenizer(context: Context, assetName: String = "bpe_hist.json") {
         for (b in 33..126) bs.add(b)
         for (b in 161..172) bs.add(b)
         for (b in 174..255) bs.add(b)
+        
         val cs = ArrayList<Int>(bs)
         var n = 0
         for (b in 0..255) {
@@ -75,6 +76,7 @@ class BpeTokenizer(context: Context, assetName: String = "bpe_hist.json") {
                 n++
             }
         }
+        
         for (i in bs.indices) {
             val c = cs[i].toChar()
             byteEncoder[bs[i]] = c
@@ -90,6 +92,7 @@ class BpeTokenizer(context: Context, assetName: String = "bpe_hist.json") {
         while (word.size > 1) {
             var bestPair: Pair<String, String>? = null
             var bestRank = Int.MAX_VALUE
+            
             for (i in 0 until word.size - 1) {
                 val pair = Pair(word[i], word[i + 1])
                 val rank = bpeRanks[pair]
@@ -98,6 +101,7 @@ class BpeTokenizer(context: Context, assetName: String = "bpe_hist.json") {
                     bestPair = pair
                 }
             }
+            
             if (bestPair == null) break
 
             val (first, second) = bestPair
@@ -127,8 +131,21 @@ class BpeTokenizer(context: Context, assetName: String = "bpe_hist.json") {
             for (b in bytes) {
                 sb.append(byteEncoder[b.toInt() and 0xFF] ?: ' ')
             }
-            for (tok in bpe(sb.toString())) {
-                vocab[tok]?.let { ids.add(it) }
+            
+            // Важно: если токен вдруг не найден (что маловероятно при полном словаре GPT-2), 
+            // мы не молча его пропускаем, а разбиваем на байты (fallback)
+            val encodedTokens = bpe(sb.toString())
+            for (tok in encodedTokens) {
+                val tokenId = vocab[tok]
+                if (tokenId != null) {
+                    ids.add(tokenId)
+                } else {
+                    // Fallback на побайтовое кодирование, если слияние не найдено в словаре
+                    for (b in bytes) {
+                        val byteTok = byteEncoder[b.toInt() and 0xFF].toString()
+                        vocab[byteTok]?.let { ids.add(it) }
+                    }
+                }
             }
         }
         return ids.toIntArray()
@@ -140,6 +157,7 @@ class BpeTokenizer(context: Context, assetName: String = "bpe_hist.json") {
             if (id == eosId) continue
             idToToken[id]?.let { sb.append(it) }
         }
+        
         val out = ByteArrayOutputStream()
         for (ch in sb.toString()) {
             val b = byteDecoder[ch]
