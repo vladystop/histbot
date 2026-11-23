@@ -113,12 +113,14 @@ class RagEngine(context: Context) {
 
     private fun cleanText(raw: String): String {
         var t = raw.replace("\u0301", "")
+            .replace("\u00A0", " ")
         t = Regex("""\[\d+]""").replace(t, "")
-        t = Regex(
-            """\([^)]*(?:монг\.|англ\.|лат\.|греч\.|фр\.|нем\.|исп\.|ит\.|кит\.|яп\.|араб\.|тюрк\.|татар\.|перс\.|рус\.|церк\.-слав\.|МФА)[^)]*\)""",
+        val langParens = Regex(
+            """\([^()]*?(?:монг\.|англ\.|лат\.|греч\.|фр\.|нем\.|исп\.|ит\.|кит\.|яп\.|араб\.|тюрк\.|татар\.|перс\.|рус\.|церк\.-слав\.|МФА)[^()]*\)""",
             RegexOption.IGNORE_CASE
-        ).replace(t, "")
-        t = Regex("""[^а-яА-ЯёЁa-zA-Z0-9\s.,;:!?()—–«»"'/-]""").replace(t, "")
+        )
+        repeat(2) { t = langParens.replace(t, "") }
+        t = Regex("""[^а-яА-ЯёЁa-zA-Z0-9²\s.,;:!?()—–«»"'/-]""").replace(t, "")
         t = Regex("""\(\s*[;:,]+\s*""").replace(t, "(")
         t = Regex("""\s*[;:,]+\s*\)""").replace(t, ")")
         t = Regex("""\([\s,;:.—–/-]*\)""").replace(t, "")
