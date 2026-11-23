@@ -41,31 +41,15 @@
         </LinearLayout>
 
         <TextView
-            android:id="@+id/historyBtn"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:id="@+id/menuBtn"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
             android:background="@drawable/bg_user_bubble"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:paddingTop="7dp"
-            android:paddingBottom="7dp"
-            android:text="История"
+            android:gravity="center"
+            android:text="⋮"
             android:textColor="#ECECEC"
-            android:textSize="12sp" />
-
-        <TextView
-            android:id="@+id/clearBtn"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:background="@drawable/bg_user_bubble"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:paddingTop="7dp"
-            android:paddingBottom="7dp"
-            android:text="Очистить"
-            android:textColor="#ECECEC"
-            android:textSize="12sp" />
+            android:textSize="20sp"
+            android:textStyle="bold" />
     </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView
