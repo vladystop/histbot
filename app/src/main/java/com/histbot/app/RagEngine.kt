@@ -127,6 +127,8 @@ class RagEngine(context: Context) {
 
     private fun cleanText(raw: String): String {
         var t = raw.replace("\u0301", "")
+        t = Regex("""(?:^|\n)[^\n]*см\.\s*(?:статью|также)[^\n]*(?:\n|$)""", RegexOption.IGNORE_CASE).replace(t, "\n")
+
         t = Regex("""\[\d+]""").replace(t, "")
         t = Regex(
             """\([^)]*(?:монг\.|англ\.|лат\.|греч\.|фр\.|нем\.|исп\.|ит\.|кит\.|яп\.|араб\.|тюрк\.|татар\.|перс\.|рус\.|церк\.-слав\.|МФА)[^)]*\)""",
