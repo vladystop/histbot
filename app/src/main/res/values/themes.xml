@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.HistBot" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#10A37F</item>
+        <item name="colorPrimaryVariant">#0D8A6A</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="android:statusBarColor">#171717</item>
+        <item name="android:navigationBarColor">#212121</item>
+        <item name="android:windowBackground">#212121</item>
+    </style>
+</resources>
