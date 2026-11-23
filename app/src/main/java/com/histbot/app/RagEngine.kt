@@ -89,7 +89,7 @@ class RagEngine(context: Context) {
 
                 val titleCoverage = tHits.toDouble() / tStems.size
                 val queryCoverage = tHits.toDouble() / qSet.size
-                if (titleCoverage < 0.75 || queryCoverage < 0.5) continue
+                if (titleCoverage < 0.75 || queryCoverage < 0.75) continue
 
                 // Если в вопросе есть уточнение (население, президент, история),
                 // которого нет в локальной статье — пропускаем её и идём в Википедию
