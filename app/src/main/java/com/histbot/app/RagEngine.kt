@@ -11,7 +11,7 @@ import java.net.URLEncoder
 data class KbItem(val title: String, val text: String)
 data class RagHit(val item: KbItem?, val sourceLabel: String)
 
-class RagEngine(context: Context) {
+class RagEngine(private val context: Context) {
     private val kbFile = File(context.filesDir, "hist_kb.json")
     private val kb = ArrayList<KbItem>()
     private val index = ArrayList<Triple<Set<String>, Set<String>, KbItem>>()
@@ -21,7 +21,9 @@ class RagEngine(context: Context) {
         "известно", "кратко", "это", "как", "где", "когда", "был", "была", "было", "были",
         "для", "при", "или", "под", "над", "из", "по", "на", "в", "о", "с", "и", "а",
         "посмотри", "найди", "поищи", "интернете", "интернет", "википедии", "википедия",
-        "скажи", "подскажи", "пожалуйста", "можешь", "нужно", "мне"
+        "скажи", "подскажи", "пожалуйста", "можешь", "нужно", "мне",
+        "момента", "начинает", "начинается", "отсчитываться", "государства", "государство",
+        "упоминание", "упоминания", "первое", "первый", "первая", "первые", "его", "ее", "её", "их"
     )
     private val smallTalk = setOf(
         "почти", "да", "нет", "ок", "окей", "ладно", "понятно", "ясно", "спасибо", "ага", "угу", "круто", "классно"
@@ -33,6 +35,12 @@ class RagEngine(context: Context) {
     )
 
     init {
+        loadKbFromDisk()
+    }
+
+    private fun loadKbFromDisk() {
+        kb.clear()
+        index.clear()
         if (!kbFile.exists()) {
             context.assets.open("hist_kb.json").use { input ->
                 kbFile.outputStream().use { output -> input.copyTo(output) }
@@ -45,6 +53,14 @@ class RagEngine(context: Context) {
             kb.add(item)
             index.add(Triple(tokenize(item.title).toSet(), tokenize(item.text).toSet(), item))
         }
+    }
+
+    fun resetCache(): Int {
+        if (kbFile.exists()) {
+            kbFile.delete()
+        }
+        loadKbFromDisk()
+        return kb.size
     }
 
     fun articleCount(): Int = kb.size
@@ -91,8 +107,6 @@ class RagEngine(context: Context) {
                 val queryCoverage = tHits.toDouble() / qSet.size
                 if (titleCoverage < 0.75 || queryCoverage < 0.75) continue
 
-                // Если в вопросе есть уточнение (население, президент, история),
-                // которого нет в локальной статье — пропускаем её и идём в Википедию
                 val missingWords = qSet.count { it !in tStems && it !in bStems }
                 if (missingWords > 0) continue
 
@@ -128,7 +142,6 @@ class RagEngine(context: Context) {
     private fun cleanText(raw: String): String {
         var t = raw.replace("\u0301", "")
         t = Regex("""(?:^|\n)[^\n]*см\.\s*(?:статью|также)[^\n]*(?:\n|$)""", RegexOption.IGNORE_CASE).replace(t, "\n")
-
         t = Regex("""\[\d+]""").replace(t, "")
         t = Regex(
             """\([^)]*(?:монг\.|англ\.|лат\.|греч\.|фр\.|нем\.|исп\.|ит\.|кит\.|яп\.|араб\.|тюрк\.|татар\.|перс\.|рус\.|церк\.-слав\.|МФА)[^)]*\)""",
@@ -177,7 +190,6 @@ class RagEngine(context: Context) {
             val results = JSONObject(searchJson).getJSONObject("query").getJSONArray("search")
             if (results.length() == 0) return null
 
-            // Выбираем из топ-5 статью, заголовок которой лучше всего совпадает с запросом
             var bestTitle = results.getJSONObject(0).getString("title")
             var bestHits = -1
             for (i in 0 until results.length()) {
