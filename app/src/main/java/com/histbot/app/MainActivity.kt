@@ -389,6 +389,30 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 val followUp = isFollowUp(effectiveQ) && currentSession.lastTopic.isNotEmpty()
+                                val metaAns = checkMetaQuestion(effectiveQ)
+                if (metaAns != null) {
+                    var finalAns = metaAns
+                    var finalSource = "Системный ответ"
+                    if (isEnglish) {
+                        val enAns = translateText(finalAns, "ru", "en")
+                        if (!enAns.isNullOrBlank()) {
+                            finalAns = enAns
+                            finalSource = "System • EN"
+                        }
+                    }
+                    withContext(Dispatchers.Main) {
+                        botMsg.text = finalAns
+                        botMsg.source = finalSource
+                        currentSession.updatedAt = System.currentTimeMillis()
+                        saveSessionsToDisk()
+                        refreshSessionList()
+                        adapter.notifyItemChanged(botIndex)
+                        isGenerating = false
+                        sendBtn.text = "↑"
+                    }
+                    return@launch
+                }
+                
                 val searchQuery = if (followUp) "${currentSession.lastTopic} $effectiveQ" else effectiveQ
 
                 val hit = rag.search(searchQuery) { st ->
