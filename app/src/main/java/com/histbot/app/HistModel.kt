@@ -88,7 +88,7 @@ class HistModel(context: Context, private val tokenizer: BpeTokenizer) {
             allIds.add(nextId)
             generated.add(nextId)
 
-            val decoded = tokenizer.decode(generated).trimStart().trimEnd('')
+            val decoded = tokenizer.decode(generated).trimStart().trimEnd('\uFFFD')
             if (decoded.isNotEmpty()) onProgress(decoded)
         }
 
