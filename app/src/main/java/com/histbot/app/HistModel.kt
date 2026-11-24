@@ -10,13 +10,23 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.exp
 import kotlin.random.Random
 
+enum class PowerMode(
+    val title: String,
+    val shortLabel: String,
+    val maxTokens: Int,
+    val temperature: Float,
+    val maxCtxChars: Int
+) {
+    LOW("Низкий (быстро, 1–2 предложения)", "Низк. ▾", 70, 0.25f, 260),
+    MEDIUM("Средний (баланс скорости и длины)", "Средн. ▾", 160, 0.30f, 520),
+    HIGH("Высокий (максимально подробно)", "Высок. ▾", 260, 0.35f, 850)
+}
+
 class HistModel(context: Context, private val tokenizer: BpeTokenizer) {
     private val env = OrtEnvironment.getEnvironment()
     private val session: OrtSession
 
     private val blockSize = 384
-    private val maxNewTokens = 160
-    private val temperature = 0.3f
     private val topP = 0.85f
     private val repetitionPenalty = 1.18f
 
@@ -36,10 +46,16 @@ class HistModel(context: Context, private val tokenizer: BpeTokenizer) {
         contextText: String,
         question: String,
         stopFlag: AtomicBoolean,
+        mode: PowerMode = PowerMode.MEDIUM,
         onProgress: (String) -> Unit
     ): String {
         val qClean = question.trim().replaceFirstChar { it.uppercase() }
-        val prompt = "Контекст: $contextText\nВопрос: $qClean\nОтвет:"
+        val ctxTrimmed = if (contextText.length > mode.maxCtxChars) {
+            contextText.take(mode.maxCtxChars)
+        } else {
+            contextText
+        }
+        val prompt = "Контекст: $ctxTrimmed\nВопрос: $qClean\nОтвет:"
         val promptIds = tokenizer.encode(prompt).toMutableList()
         val trimmed = if (promptIds.size > blockSize - 16) {
             promptIds.takeLast(blockSize - 16).toMutableList()
@@ -50,7 +66,7 @@ class HistModel(context: Context, private val tokenizer: BpeTokenizer) {
         val generated = ArrayList<Int>()
         val allIds = ArrayList<Int>(trimmed)
 
-        for (step in 0 until maxNewTokens) {
+        for (step in 0 until mode.maxTokens) {
             if (stopFlag.get()) break
 
             val cond = if (allIds.size > blockSize) allIds.takeLast(blockSize) else allIds
@@ -64,7 +80,7 @@ class HistModel(context: Context, private val tokenizer: BpeTokenizer) {
                 session.run(mapOf("input_ids" to tensor)).use { result ->
                     @Suppress("UNCHECKED_CAST")
                     val logits = (result[0].value as Array<FloatArray>)[0].copyOf()
-                    sampleToken(logits, generated)
+                    sampleToken(logits, generated, mode.temperature)
                 }
             }
 
@@ -72,14 +88,14 @@ class HistModel(context: Context, private val tokenizer: BpeTokenizer) {
             allIds.add(nextId)
             generated.add(nextId)
 
-            val decoded = tokenizer.decode(generated).trimStart().trimEnd('�')
+            val decoded = tokenizer.decode(generated).trimStart().trimEnd('')
             if (decoded.isNotEmpty()) onProgress(decoded)
         }
 
         return tokenizer.decode(generated).trim()
     }
 
-    private fun sampleToken(logits: FloatArray, generated: List<Int>): Int {
+    private fun sampleToken(logits: FloatArray, generated: List<Int>, temperature: Float): Int {
         if (repetitionPenalty != 1.0f && generated.isNotEmpty()) {
             for (tid in generated.toSet()) {
                 if (tid in logits.indices) {
