@@ -92,7 +92,9 @@ class HistModel(context: Context, private val tokenizer: BpeTokenizer) {
             if (decoded.isNotEmpty()) onProgress(decoded)
         }
 
-        return tokenizer.decode(generated).trim()
+        val raw = tokenizer.decode(generated).trim().trimEnd('\uFFFD')
+        val lastEnd = raw.lastIndexOfAny(charArrayOf('.', '!', '?'))
+        return if (lastEnd > raw.length / 2) raw.substring(0, lastEnd + 1) else raw
     }
 
     private fun sampleToken(logits: FloatArray, generated: List<Int>, temperature: Float): Int {
