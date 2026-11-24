@@ -391,7 +391,8 @@ class MainActivity : AppCompatActivity() {
                 val followUp = isFollowUp(effectiveQ) && currentSession.lastTopic.isNotEmpty()
                                 val metaAns = checkMetaQuestion(effectiveQ)
                 if (metaAns != null) {
-                    var finalAns = metaAns
+                    var finalAns: String = metaAns
+                    
                     var finalSource = "Системный ответ"
                     if (isEnglish) {
                         val enAns = translateText(finalAns, "ru", "en")
