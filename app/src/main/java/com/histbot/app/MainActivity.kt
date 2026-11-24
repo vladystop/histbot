@@ -31,6 +31,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 import java.util.concurrent.atomic.AtomicBoolean
 
 data class ChatMessage(
@@ -174,7 +177,7 @@ class SessionAdapter(
 
 class MainActivity : AppCompatActivity() {
     private val welcomeText =
-        "Привет! Я твоя локальная историческая нейросеть на 30M параметров. Спрашивай про события, правителей и эпохи."
+        "Привет! Я твоя локальная историческая нейросеть на 30M параметров. Спрашивай про события, правителей и эпохи (можно и на английском)."
 
     private val followUpMarkers = setOf(
         "он", "она", "оно", "они", "его", "её", "ее", "их", "ему", "ей", "им",
@@ -367,12 +370,26 @@ class MainActivity : AppCompatActivity() {
             stopFlag.set(false)
             sendBtn.text = "■"
 
+            val isEnglish = isEnglishText(q)
+
             lifecycleScope.launch(Dispatchers.IO) {
                 val rag = ragEngine!!
                 val model = histModel!!
 
-                val followUp = isFollowUp(q) && currentSession.lastTopic.isNotEmpty()
-                val searchQuery = if (followUp) "${currentSession.lastTopic} $q" else q
+                var effectiveQ = q
+                if (isEnglish) {
+                    runOnUiThread {
+                        botMsg.source = "Перевод вопроса (EN → RU)..."
+                        adapter.notifyItemChanged(botIndex)
+                    }
+                    val translated = translateText(q, "en", "ru")
+                    if (!translated.isNullOrBlank()) {
+                        effectiveQ = translated
+                    }
+                }
+
+                val followUp = isFollowUp(effectiveQ) && currentSession.lastTopic.isNotEmpty()
+                val searchQuery = if (followUp) "${currentSession.lastTopic}$effectiveQ" else effectiveQ
 
                 val hit = rag.search(searchQuery) { st ->
                     runOnUiThread {
@@ -384,260 +401,8 @@ class MainActivity : AppCompatActivity() {
                 val baseCtx: String
                 val sourceLabel: String
                 if (hit.item != null) {
-                    baseCtx = "${hit.item.title}. ${hit.item.text}"
+                    baseCtx = "${hit.item.title}.${hit.item.text}"
                     sourceLabel = hit.sourceLabel
                     currentSession.lastTopic = hit.item.title
                     currentSession.lastContext = baseCtx
                 } else if (followUp && currentSession.lastContext.isNotEmpty()) {
-                    baseCtx = currentSession.lastContext
-                    sourceLabel = "Память чата: ${currentSession.lastTopic}"
-                } else {
-                    baseCtx = "нет данных."
-                    sourceLabel = hit.sourceLabel
-                }
-
-                val modelQuestion = if (followUp) "${currentSession.lastTopic}: $q" else q
-
-                withContext(Dispatchers.Main) {
-                    botMsg.source = sourceLabel
-                    botMsg.text = ""
-                    adapter.notifyItemChanged(botIndex)
-                }
-
-                val finalAns = if (rag.isGreeting(q) && q.lowercase().startsWith("привет")) {
-                    "Привет! Я локальная историческая нейросеть на 30M параметров с базой знаний (RAG). Задавай вопросы по истории!"
-                } else {
-                    model.generate(baseCtx, modelQuestion, stopFlag, currentPower) { partial ->
-                        runOnUiThread {
-                            val atBottom = !recycler.canScrollVertically(1)
-                            botMsg.text = partial
-                            adapter.notifyItemChanged(botIndex)
-                            if (atBottom) recycler.scrollToPosition(botIndex)
-                        }
-                    }
-                }
-
-                withContext(Dispatchers.Main) {
-                    botMsg.text = finalAns.ifEmpty { "Не удалось сформировать ответ." }
-                    currentSession.updatedAt = System.currentTimeMillis()
-                    saveSessionsToDisk()
-                    refreshSessionList()
-                    adapter.notifyItemChanged(botIndex)
-                    updateStatusBar(rag.articleCount())
-                    isGenerating = false
-                    sendBtn.text = "↑"
-                }
-            }
-        }
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
-            drawerLayout.closeDrawer(GravityCompat.START)
-        } else {
-            super.onBackPressed()
-        }
-    }
-
-    private fun updateStatusBar(count: Int) {
-        statusText.text = "Готов • $count статей + Википедия"
-        val extra = (count - 2456).coerceAtLeast(0)
-        cacheInfoText.text = "Сбросить кэш Википедии (+$extra)"
-    }
-
-    private fun showPowerDialog() {
-        val modes = PowerMode.values()
-        val labels = modes.map { it.title }.toTypedArray()
-        val checked = modes.indexOf(currentPower)
-
-        AlertDialog.Builder(this)
-            .setTitle("Мощность ответа")
-            .setSingleChoiceItems(labels, checked) { dialog, which ->
-                currentPower = modes[which]
-                powerBtn.text = currentPower.shortLabel
-                getSharedPreferences("histbot_prefs", MODE_PRIVATE)
-                    .edit()
-                    .putString("power_mode", currentPower.name)
-                    .apply()
-                dialog.dismiss()
-            }
-            .setNegativeButton("Отмена", null)
-            .show()
-    }
-
-    private fun showSessionActions(session: ChatSession) {
-        val pinLabel = if (session.isPinned) "Открепить" else "Закрепить"
-        val options = arrayOf(pinLabel, "Переименовать", "Удалить")
-
-        AlertDialog.Builder(this)
-            .setTitle(session.title)
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> {
-                        session.isPinned = !session.isPinned
-                        saveSessionsToDisk()
-                        refreshSessionList()
-                    }
-                    1 -> {
-                        val edit = EditText(this).apply {
-                            setText(session.title)
-                            setSelection(text.length)
-                        }
-                        AlertDialog.Builder(this)
-                            .setTitle("Переименовать чат")
-                            .setView(edit)
-                            .setPositiveButton("Сохранить") { _, _ ->
-                                val newTitle = edit.text.toString().trim()
-                                if (newTitle.isNotEmpty()) {
-                                    session.title = newTitle
-                                    saveSessionsToDisk()
-                                    refreshSessionList()
-                                }
-                            }
-                            .setNegativeButton("Отмена", null)
-                            .show()
-                    }
-                    2 -> {
-                        sessions.removeAll { it.id == session.id }
-                        saveSessionsToDisk()
-                        if (currentSession.id == session.id) {
-                            if (sessions.isNotEmpty()) {
-                                openSession(sessions.first())
-                            } else {
-                                startNewChat()
-                            }
-                        } else {
-                            refreshSessionList()
-                        }
-                        Toast.makeText(this, "Чат удалён", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            .show()
-    }
-
-    private fun copyToClipboard(text: String) {
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("HistBot", text))
-        Toast.makeText(this, "Скопировано", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun isFollowUp(q: String): Boolean {
-        val words = Regex("""[а-яА-ЯёЁa-zA-Z0-9]+""").findAll(q.lowercase()).map { it.value }.toList()
-        return words.any { it in followUpMarkers }
-    }
-
-    private fun startNewChat() {
-        currentSession = ChatSession(
-            id = System.currentTimeMillis().toString(),
-            title = "Новый чат",
-            updatedAt = System.currentTimeMillis(),
-            messages = arrayListOf(ChatMessage(false, welcomeText))
-        )
-        messages.clear()
-        messages.addAll(currentSession.messages)
-        adapter.notifyDataSetChanged()
-        refreshSessionList()
-    }
-
-    private fun openSession(session: ChatSession) {
-        currentSession = session
-        messages.clear()
-        messages.addAll(session.messages)
-        adapter.notifyDataSetChanged()
-        refreshSessionList()
-        if (messages.isNotEmpty()) {
-            recycler.scrollToPosition(messages.size - 1)
-        }
-    }
-
-    private fun upsertCurrentSession() {
-        sessions.removeAll { it.id == currentSession.id }
-        sessions.add(0, currentSession)
-        refreshSessionList()
-    }
-
-    private fun refreshSessionList() {
-        val query = searchChatsEdit.text.toString().trim().lowercase()
-        val sorted = sessions.sortedWith(
-            compareByDescending<ChatSession> { it.isPinned }.thenByDescending { it.updatedAt }
-        )
-        filteredSessions.clear()
-        if (query.isEmpty()) {
-            filteredSessions.addAll(sorted)
-        } else {
-            filteredSessions.addAll(
-                sorted.filter { s ->
-                    s.title.lowercase().contains(query) ||
-                        s.messages.any { it.text.lowercase().contains(query) }
-                }
-            )
-        }
-        sessionAdapter.notifyDataSetChanged()
-    }
-
-    private fun saveSessionsToDisk() {
-        try {
-            val arr = JSONArray()
-            for (s in sessions.take(50)) {
-                val msgArr = JSONArray()
-                for (m in s.messages) {
-                    msgArr.put(
-                        JSONObject()
-                            .put("isUser", m.isUser)
-                            .put("text", m.text)
-                            .put("source", m.source)
-                    )
-                }
-                arr.put(
-                    JSONObject()
-                        .put("id", s.id)
-                        .put("title", s.title)
-                        .put("updatedAt", s.updatedAt)
-                        .put("isPinned", s.isPinned)
-                        .put("lastTopic", s.lastTopic)
-                        .put("lastContext", s.lastContext)
-                        .put("messages", msgArr)
-                )
-            }
-            historyFile.writeText(arr.toString(), Charsets.UTF_8)
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun loadSessionsFromDisk() {
-        sessions.clear()
-        if (!historyFile.exists()) return
-        try {
-            val arr = JSONArray(historyFile.readText(Charsets.UTF_8))
-            for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
-                val msgArr = obj.getJSONArray("messages")
-                val msgs = ArrayList<ChatMessage>()
-                for (j in 0 until msgArr.length()) {
-                    val m = msgArr.getJSONObject(j)
-                    msgs.add(
-                        ChatMessage(
-                            isUser = m.getBoolean("isUser"),
-                            text = m.getString("text"),
-                            source = m.optString("source", "")
-                        )
-                    )
-                }
-                sessions.add(
-                    ChatSession(
-                        id = obj.getString("id"),
-                        title = obj.getString("title"),
-                        updatedAt = obj.getLong("updatedAt"),
-                        isPinned = obj.optBoolean("isPinned", false),
-                        lastTopic = obj.optString("lastTopic", ""),
-                        lastContext = obj.optString("lastContext", ""),
-                        messages = msgs
-                    )
-                )
-            }
-        } catch (_: Exception) {
-        }
-    }
-}
