@@ -491,6 +491,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun isEnglishText(text: String): Boolean {
+            private fun checkMetaQuestion(q: String): String? {
+        val low = q.lowercase()
+        val aboutImages = listOf("картинк", "рисун", "рисовать", "изображен", "фото", "нарисуй")
+        if (aboutImages.any { low.contains(it) } &&
+            (low.contains("умеешь") || low.contains("можешь") || low.contains("нарисуй") || low.contains("созда"))
+        ) {
+            return "Нет, я не умею создавать картинки. Я локальная текстовая нейросеть на 30M параметров, специализируюсь на истории."
+        }
+        val aboutSelf = listOf(
+            "кто ты", "что ты такое", "что ты умеешь", "ты нейросеть", "ты бот",
+            "как тебя зовут", "кто тебя создал", "твои возможности", "ты умеешь"
+        )
+        if (aboutSelf.any { low.contains(it) }) {
+            return "Я HistBot 30M — локальная историческая нейросеть на 30 миллионов параметров с базой знаний и поиском по Википедии. Отвечаю на вопросы по истории на русском и английском языках."
+        }
+        return null
+            }
+            
         val latin = text.count { it in 'a'..'z' || it in 'A'..'Z' }
         val cyrillic = text.count { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' }
         return latin > 0 && latin >= cyrillic
