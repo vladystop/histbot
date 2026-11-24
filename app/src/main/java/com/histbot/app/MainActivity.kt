@@ -490,7 +490,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun isEnglishText(text: String): Boolean {
+
             private fun checkMetaQuestion(q: String): String? {
         val low = q.lowercase()
         val aboutImages = listOf("картинк", "рисун", "рисовать", "изображен", "фото", "нарисуй")
@@ -508,7 +508,8 @@ class MainActivity : AppCompatActivity() {
         }
         return null
             }
-            
+             private fun isEnglishText(text: String): Boolean {
+                 
         val latin = text.count { it in 'a'..'z' || it in 'A'..'Z' }
         val cyrillic = text.count { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' }
         return latin > 0 && latin >= cyrillic
